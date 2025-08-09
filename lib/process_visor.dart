@@ -74,10 +74,12 @@ class ProcessVisor {
 
   Process? _process;
   ProcessStatus _status = ProcessStatus.absent;
+  final _statusController = StreamController<ProcessStatus>.broadcast();
   StreamSubscription<List<int>>? _stdoutSubscription;
   StreamSubscription<List<int>>? _stderrSubscription;
   bool _closed = false;
   Completer<void>? _stopCompleter;
+  Completer<void>? _startedCompleter;
   int? _pid;
 
   /// Creates a new ProcessVisor to manage a process.
@@ -115,6 +117,24 @@ class ProcessVisor {
   /// - [ProcessStatus.stopping]: Process is being terminated
   ProcessStatus get status => _status;
 
+  /// A stream of status changes for the managed process.
+  ///
+  /// Emits a new [ProcessStatus] value whenever the process status changes.
+  /// This is useful for reactive monitoring of the process lifecycle.
+  Stream<ProcessStatus> get statusChanges => _statusController.stream;
+
+  /// A future that completes when the process reaches its first running status.
+  ///
+  /// This future completes successfully when the process status first transitions
+  /// to [ProcessStatus.running]. If the ProcessVisor is closed before the process
+  /// starts, the future completes with a [StateError].
+  ///
+  /// Each call to [start] creates a new future, so this represents the startup
+  /// of the current process attempt.
+  Future<void> get started =>
+      _startedCompleter?.future ??
+      Future.error(StateError('Process not started'));
+
   /// The process ID (PID) of the currently running or last ran process.
   ///
   /// Returns `null` if no process has been started yet.
@@ -139,7 +159,11 @@ class ProcessVisor {
       return;
     }
 
-    _status = ProcessStatus.starting;
+    // Create new started completer for this start attempt
+    _completeStartedIfNeeded();
+    _startedCompleter = Completer<void>();
+
+    _updateStatus(ProcessStatus.starting);
     _logWriter((
       pid: null,
       isError: false,
@@ -166,10 +190,10 @@ class ProcessVisor {
 
       // If no start indicator, immediately transition to running
       if (_startIndicator == null) {
-        _status = ProcessStatus.running;
+        _updateStatus(ProcessStatus.running);
       }
     } catch (e) {
-      _status = ProcessStatus.absent;
+      _updateStatus(ProcessStatus.absent);
       _logWriter((
         pid: null,
         isError: true,
@@ -194,7 +218,7 @@ class ProcessVisor {
       return;
     }
 
-    _status = ProcessStatus.stopping;
+    _updateStatus(ProcessStatus.stopping);
     _logWriter((pid: _process?.pid, isError: false, text: 'Stopping process'));
 
     if (_process != null) {
@@ -229,7 +253,7 @@ class ProcessVisor {
     }
 
     await _cleanup();
-    _status = ProcessStatus.absent;
+    _updateStatus(ProcessStatus.absent);
 
     if (_stopCompleter != null && !_stopCompleter!.isCompleted) {
       _stopCompleter!.complete();
@@ -265,6 +289,18 @@ class ProcessVisor {
 
     if (_status == ProcessStatus.running || _status == ProcessStatus.starting) {
       stop();
+    }
+
+    _completeStartedIfNeeded();
+    _statusController.close();
+  }
+
+  /// Complete started completer with error if not yet completed
+  void _completeStartedIfNeeded() {
+    if (_startedCompleter != null && !_startedCompleter!.isCompleted) {
+      _startedCompleter!.completeError(
+        StateError('ProcessVisor was closed before process started'),
+      );
     }
   }
 
@@ -326,7 +362,7 @@ class ProcessVisor {
           await _cleanup();
 
           if (_closed) {
-            _status = ProcessStatus.absent;
+            _updateStatus(ProcessStatus.absent);
             return;
           }
 
@@ -336,11 +372,11 @@ class ProcessVisor {
               isError: false,
               text: 'Restarting process due to failure',
             ));
-            _status = ProcessStatus.absent;
+            _updateStatus(ProcessStatus.absent);
             await Future.delayed(const Duration(seconds: 1));
             await start();
           } else {
-            _status = ProcessStatus.absent;
+            _updateStatus(ProcessStatus.absent);
           }
         })
         .catchError((error) {
@@ -349,14 +385,30 @@ class ProcessVisor {
             isError: true,
             text: 'Process monitoring error: $error',
           ));
-          _status = ProcessStatus.absent;
+          _updateStatus(ProcessStatus.absent);
         });
+  }
+
+  void _updateStatus(ProcessStatus newStatus) {
+    if (_status != newStatus) {
+      _status = newStatus;
+      if (!_statusController.isClosed) {
+        _statusController.add(newStatus);
+      }
+
+      // Complete the started completer when first reaching running status
+      if (newStatus == ProcessStatus.running &&
+          _startedCompleter != null &&
+          !_startedCompleter!.isCompleted) {
+        _startedCompleter!.complete();
+      }
+    }
   }
 
   void _checkStartIndicator(LogRecord record) {
     if (_startIndicator != null && _status == ProcessStatus.starting) {
       if (_startIndicator(record)) {
-        _status = ProcessStatus.running;
+        _updateStatus(ProcessStatus.running);
         _logWriter((
           pid: _process?.pid,
           isError: false,

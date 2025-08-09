@@ -9,6 +9,8 @@ A simple Dart package for managing OS processes with automatic restart capabilit
 - Automatic restart on process failure
 - Graceful shutdown with force-kill fallback
 - Optional startup readiness detection
+- Reactive status monitoring via stream
+- Await process startup completion
 
 ## Usage
 
@@ -22,6 +24,11 @@ final visor = ProcessVisor(
 );
 
 await visor.start();
+await visor.started; // Wait for process to be ready
+
+// Monitor status changes
+visor.statusChanges.listen((status) => print('Status: $status'));
+
 // Process runs and outputs logs...
 await visor.stop();
 visor.close();

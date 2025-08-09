@@ -7,8 +7,19 @@ void main() async {
     restartOnFailure: true,
   );
 
+  // Monitor status changes
+  visor.statusChanges.listen((status) => print('Status changed to: $status'));
+
   await visor.start();
-  // Process runs and outputs logs...
+  print('Process starting...');
+
+  // Wait for process to be ready
+  await visor.started;
+  print('Process is now running!');
+
+  // Let it run for a few seconds
+  await Future.delayed(Duration(seconds: 3));
+
   await visor.stop();
   visor.close();
 }
