@@ -75,8 +75,8 @@ class ProcessVisor {
   Process? _process;
   ProcessStatus _status = ProcessStatus.absent;
   final _statusController = StreamController<ProcessStatus>.broadcast();
-  StreamSubscription<List<int>>? _stdoutSubscription;
-  StreamSubscription<List<int>>? _stderrSubscription;
+  StreamSubscription? _stdoutSubscription;
+  StreamSubscription? _stderrSubscription;
   bool _closed = false;
   Completer<void>? _stopCompleter;
   Completer<void>? _startedCompleter;
@@ -307,45 +307,37 @@ class ProcessVisor {
   void _connectStreams() {
     if (_process == null) return;
 
-    _stdoutSubscription = _process!.stdout.listen(
-      (data) {
-        final text = utf8.decode(data).trim();
-        if (text.isNotEmpty) {
-          final record = (pid: _process!.pid, isError: false, text: text);
-          _logWriter(record);
-          _checkStartIndicator(record);
-        }
-      },
-      onError: (error) {
-        final record = (
-          pid: _process?.pid,
-          isError: true,
-          text: 'stdout error: $error',
-        );
-        _logWriter(record);
-        _checkStartIndicator(record);
-      },
-    );
+    StreamSubscription connect(Stream<List<int>> stream, bool isError) {
+      return stream
+          .transform(Utf8Decoder(allowMalformed: true))
+          .transform(LineSplitter())
+          .listen(
+            (text) {
+              text = text.trim();
+              if (text.isNotEmpty) {
+                final record = (
+                  pid: _process!.pid,
+                  isError: isError,
+                  text: text,
+                );
+                _logWriter(record);
+                _checkStartIndicator(record);
+              }
+            },
+            onError: (error) {
+              final record = (
+                pid: _process?.pid,
+                isError: true,
+                text: '${isError ? 'stderr' : 'stdout'} error: $error',
+              );
+              _logWriter(record);
+              _checkStartIndicator(record);
+            },
+          );
+    }
 
-    _stderrSubscription = _process!.stderr.listen(
-      (data) {
-        final text = utf8.decode(data).trim();
-        if (text.isNotEmpty) {
-          final record = (pid: _process!.pid, isError: true, text: text);
-          _logWriter(record);
-          _checkStartIndicator(record);
-        }
-      },
-      onError: (error) {
-        final record = (
-          pid: _process?.pid,
-          isError: true,
-          text: 'stderr error: $error',
-        );
-        _logWriter(record);
-        _checkStartIndicator(record);
-      },
-    );
+    _stdoutSubscription = connect(_process!.stdout, false);
+    _stderrSubscription = connect(_process!.stderr, true);
   }
 
   void _monitorProcess() {
@@ -396,11 +388,18 @@ class ProcessVisor {
         _statusController.add(newStatus);
       }
 
-      // Complete the started completer when first reaching running status
-      if (newStatus == ProcessStatus.running &&
-          _startedCompleter != null &&
-          !_startedCompleter!.isCompleted) {
-        _startedCompleter!.complete();
+      final isCompleted = _startedCompleter?.isCompleted ?? false;
+      if (!isCompleted) {
+        switch (newStatus) {
+          case ProcessStatus.starting:
+            break;
+          case ProcessStatus.running:
+            _startedCompleter!.complete();
+            break;
+          case ProcessStatus.stopping:
+          case ProcessStatus.absent:
+            _completeStartedIfNeeded();
+        }
       }
     }
   }
