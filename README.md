@@ -16,6 +16,7 @@ Also a process switcher, where higher-priority tasks may interrupt background pr
 
 - Context- and compatibility-aware process switching
 - Priority-based scheduling and preemption
+- Stops process after configured idle duration
 
 ## Usage
 

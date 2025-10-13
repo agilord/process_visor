@@ -6,7 +6,11 @@ abstract class ProcessContext {
   /// How much tasks may be calling the client concurrently.
   final int concurrency;
 
-  ProcessContext({required this.concurrency});
+  /// Optional idle timeout for this context. If specified, overrides the
+  /// ProcessSwitcher's global idle timeout for this specific context.
+  final Duration? idleTimeout;
+
+  ProcessContext({required this.concurrency, this.idleTimeout});
 
   /// Closes the context and releases resources.
   ///
@@ -34,8 +38,13 @@ class ProcessSwitcher {
   _Entry? _current;
   Future<void>? _switchingFuture;
   final _pendingTasks = <_PendingTask>[];
+  final Duration? idleTimeout;
+  Timer? _idleTimer;
 
-  ProcessSwitcher();
+  ProcessSwitcher({this.idleTimeout});
+
+  /// Returns true if there is an active process running.
+  bool get hasActiveProcess => _current != null;
 
   /// Execute a function with the specified context loaded
   ///
@@ -71,6 +80,7 @@ class ProcessSwitcher {
     // If current context matches and accepting requests, use it
     final c = _current;
     if (c != null && c.acceptingRequests && _accept(c.context, spec)) {
+      _cancelIdleTimer();
       _current!.scheduleExecution();
       return await task.completer.future;
     }
@@ -214,6 +224,30 @@ class ProcessSwitcher {
   /// Called when there are no more tasks for the current context
   void _onNoMoreTasks() {
     _checkPendingTasksForSwitch();
+    _startIdleTimer();
+  }
+
+  /// Start the idle timer if configured
+  void _startIdleTimer() {
+    if (_pendingTasks.isNotEmpty) return;
+    if (_current == null) return;
+
+    // Use context-specific timeout if available, otherwise use switcher timeout
+    final timeout = _current!.client.idleTimeout ?? idleTimeout;
+    if (timeout == null) return;
+
+    _cancelIdleTimer();
+    _idleTimer = Timer(timeout, () async {
+      if (_pendingTasks.isEmpty && _current != null) {
+        await _stopProcess();
+      }
+    });
+  }
+
+  /// Cancel the idle timer
+  void _cancelIdleTimer() {
+    _idleTimer?.cancel();
+    _idleTimer = null;
   }
 
   /// Get the next task for the current context (highest priority)
@@ -253,6 +287,7 @@ class ProcessSwitcher {
 
   /// Stop all processes and cleanup resources
   Future<void> stop() async {
+    _cancelIdleTimer();
     await _stopProcess();
   }
 }

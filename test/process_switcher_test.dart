@@ -249,6 +249,43 @@ void main() {
 
       expect(executionLog, ['request1', 'request2']);
     });
+
+    test('idle timeout stops process after inactivity', () async {
+      final idleSwitcher = ProcessSwitcher(
+        idleTimeout: Duration(milliseconds: 200),
+      );
+
+      try {
+        final context = HttpServiceSpec(port: 8012);
+
+        // Execute a task
+        await idleSwitcher.withContext(context, (context) async {
+          await httpGet(context.client, 'http://localhost:8012/test');
+          return 200;
+        });
+
+        // Process should be active after task execution
+        expect(idleSwitcher.hasActiveProcess, isTrue);
+
+        // Wait for idle timeout to elapse
+        await Future.delayed(Duration(milliseconds: 300));
+
+        // Process should have stopped after idle timeout
+        expect(idleSwitcher.hasActiveProcess, isFalse);
+
+        // Execute another task - should work even after idle timeout
+        await idleSwitcher.withContext(context, (context) async {
+          await httpGet(context.client, 'http://localhost:8012/test2');
+          return 200;
+        });
+
+        // Process should be active again
+        expect(idleSwitcher.hasActiveProcess, isTrue);
+      } finally {
+        await idleSwitcher.stop();
+        await Future.delayed(Duration(milliseconds: 100));
+      }
+    });
   });
 }
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- `ProcessSwitcher` stops process after a configured idle duration.
+
 ## 0.3.0
 
 - Updated SDK constraints and lints
