@@ -79,7 +79,7 @@ class ProcessSwitcher {
 
     // If current context matches and accepting requests, use it
     final c = _current;
-    if (c != null && c.acceptingRequests && _accept(c.context, spec)) {
+    if (c != null && c.acceptingRequests && _accept(c.spec, spec)) {
       _cancelIdleTimer();
       _current!.scheduleExecution();
       return await task.completer.future;
@@ -142,7 +142,7 @@ class ProcessSwitcher {
     if (_current == null) return true;
 
     // If same context, no switch needed
-    if (_accept(_current!.context, task.spec)) return false;
+    if (_accept(_current!.spec, task.spec)) return false;
 
     // Different context needed - check if this task has highest priority
     final otherTasks = _pendingTasks.where((t) => t != task).toList();
@@ -171,7 +171,7 @@ class ProcessSwitcher {
     // Find the highest priority task that needs a different context
     final tasksNeedingSwitch = _pendingTasks.where((task) {
       if (_current == null) return true;
-      return !_accept(_current!.context, task.spec);
+      return !_accept(_current!.spec, task.spec);
     }).toList();
 
     if (tasksNeedingSwitch.isEmpty) return;
@@ -233,7 +233,7 @@ class ProcessSwitcher {
     if (_current == null) return;
 
     // Use context-specific timeout if available, otherwise use switcher timeout
-    final timeout = _current!.client.idleTimeout ?? idleTimeout;
+    final timeout = _current!.context.idleTimeout ?? idleTimeout;
     if (timeout == null) return;
 
     _cancelIdleTimer();
@@ -268,7 +268,7 @@ class ProcessSwitcher {
 
   /// Switch to a different context, starting/stopping processes as needed
   Future<void> _switchToContext(ProcessSpec context) async {
-    final c = _current?.context;
+    final c = _current?.spec;
     if (c != null && _accept(c, context)) {
       return; // Already using the correct context
     }
@@ -294,15 +294,15 @@ class ProcessSwitcher {
 
 class _Entry<C extends ProcessContext> {
   final ProcessSwitcher _switcher;
-  final ProcessSpec context;
-  final C client;
+  final ProcessSpec spec;
+  final C context;
   final void Function() _onNoMoreTasks;
   final _runningFutures = <Future>[];
   bool _acceptingRequests = true;
   bool _preempting = false;
   int _preemptBlockCounter = 0;
 
-  _Entry(this._switcher, this.context, this.client, this._onNoMoreTasks);
+  _Entry(this._switcher, this.spec, this.context, this._onNoMoreTasks);
 
   bool get acceptingRequests => _acceptingRequests;
 
@@ -318,12 +318,12 @@ class _Entry<C extends ProcessContext> {
     if (!_acceptingRequests) {
       return;
     }
-    if (_runningFutures.length >= client.concurrency) {
+    if (_runningFutures.length >= context.concurrency) {
       return;
     }
 
     scheduleMicrotask(() async {
-      final task = _switcher._getNextTask(context);
+      final task = _switcher._getNextTask(spec);
       if (task == null) {
         // No more tasks for this context, notify the switcher
         if (_runningFutures.isEmpty && _acceptingRequests) {
@@ -338,7 +338,7 @@ class _Entry<C extends ProcessContext> {
         _preemptBlockCounter++;
       }
       try {
-        final result = await task.contextFn(client);
+        final result = await task.contextFn(context);
         task.completer.complete(result);
       } catch (e, stack) {
         // If we're preempting and the task is preemptable, re-queue it
@@ -372,7 +372,7 @@ class _Entry<C extends ProcessContext> {
 
   Future<void> stop() async {
     _acceptingRequests = false;
-    await client.close();
+    await context.close();
   }
 }
 
