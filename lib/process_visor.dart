@@ -213,7 +213,9 @@ class ProcessVisor {
   /// 4. Cleans up all resources and sets status to [ProcessStatus.absent]
   ///
   /// This method is safe to call multiple times.
-  Future<void> stop() async {
+  ///
+  /// Calling with [force] `true` skips the SIGTERM signal and the gradeful wait period.
+  Future<void> stop({bool force = false}) async {
     if (_status != ProcessStatus.running && _status != ProcessStatus.starting) {
       return;
     }
@@ -223,20 +225,24 @@ class ProcessVisor {
 
     if (_process != null) {
       try {
-        _process!.kill(ProcessSignal.sigterm);
+        _process!.kill(force ? ProcessSignal.sigkill : ProcessSignal.sigterm);
 
-        final result = await _process!.exitCode.timeout(
-          const Duration(seconds: 5),
-          onTimeout: () {
-            _logWriter((
-              pid: _process?.pid,
-              isError: false,
-              text: 'Force killing process',
-            ));
-            _process!.kill(ProcessSignal.sigkill);
-            return _process!.exitCode;
-          },
-        );
+        var resultFuture = _process!.exitCode;
+        if (!force) {
+          resultFuture = resultFuture.timeout(
+            Duration(seconds: force ? 0 : 5),
+            onTimeout: () {
+              _logWriter((
+                pid: _process?.pid,
+                isError: false,
+                text: 'Force killing process',
+              ));
+              _process!.kill(ProcessSignal.sigkill);
+              return _process!.exitCode;
+            },
+          );
+        }
+        final result = await resultFuture;
 
         _logWriter((
           pid: _process?.pid,

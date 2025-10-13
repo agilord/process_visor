@@ -1,16 +1,21 @@
-# Process Visor
+A Dart package for managing OS processes with automatic restart capabilities.
 
-A simple Dart package for managing OS processes with automatic restart capabilities.
+Also a process switcher, where higher-priority tasks may interrupt background processing.
 
-## Features
+## Managing a process
 
 - Start, stop, and restart processes
 - Capture stdout/stderr output via callbacks
 - Automatic restart on process failure
 - Graceful shutdown with force-kill fallback
-- Optional startup readiness detection
+- Startup readiness detection
 - Reactive status monitoring via stream
 - Await process startup completion
+
+## Process switcher
+
+- Context- and compatibility-aware process switching
+- Priority-based scheduling and preemption
 
 ## Usage
 
@@ -32,4 +37,24 @@ visor.statusChanges.listen((status) => print('Status: $status'));
 // Process runs and outputs logs...
 await visor.stop();
 visor.close();
+```
+
+### ProcessSwitcher
+
+Manage multiple process contexts with automatic switching:
+
+```dart
+import 'package:process_visor/process_switcher.dart';
+
+final switcher = ProcessSwitcher<MyProcess>();
+
+// Execute with priority-based context switching
+await switcher.withContext(
+  mySpec,
+  (context) async => await context.doWork(),
+  priority: 10,
+  preemptable: true,
+);
+
+await switcher.stop();
 ```

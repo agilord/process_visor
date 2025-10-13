@@ -3,6 +3,7 @@
 ## 0.3.0
 
 - Updated SDK constraints and lints
+- Support for context-aware, priority-based process runner: `ProcessSwitcher`.
 
 ## 0.2.1
 

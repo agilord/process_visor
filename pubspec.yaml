@@ -1,5 +1,5 @@
 name: process_visor
-description: Manages (start, stop, restart) an OS process.
+description: Manages (start, stop, restart) an OS process, switches it dynamic context and call priorities.
 version: 0.3.0
 homepage: https://github.com/agilord/process_visor
 topics:
